@@ -1,0 +1,36 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  document-system:
+    build: .
+    container_name: document-management-system
+    restart: unless-stopped
+    # 挂载数据目录，持久化存储
+    volumes:
+      - ./data/database:/app/data/database
+      - ./data/images:/app/data/images
+      - ./data/ocr_results:/app/data/ocr_results
+      - ./data/models:/app/data/models
+      # 如果需要挂载配置文件
+      # - ./config:/app/config
+    # 环境变量
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      - DISPLAY=${DISPLAY}  # 对于GUI应用，需要X11转发
+    # 端口映射（如果需要）
+    # ports:
+    #   - "8080:8080"
+    # 网络模式（对于GUI应用需要主机网络）
+    network_mode: host
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+    # 如果需要在容器中支持GUI（Linux/macOS）
+    # privileged: true
+    # stdin_open: true
+    # tty: true
