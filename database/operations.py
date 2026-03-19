@@ -39,7 +39,20 @@ class DatabaseManager:
         
         # 启用外键
         cursor.execute("PRAGMA foreign_keys = ON")
-        
+
+
+        # 创建固定年份（由管理员设置）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_config (
+                config_key TEXT PRIMARY KEY,
+                config_value TEXT
+            )
+        """)
+        # 插入默认年份（如果不存在）
+        cursor.execute("INSERT OR IGNORE INTO system_config (config_key, config_value) VALUES ('working_year', '2025')")
+
+
+
         # 创建users表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -167,6 +180,16 @@ class DatabaseManager:
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
         """)
+
+        # TODO 处理收文之后的取件人信息
+        try:
+            cursor.execute("PRAGMA table_info(receive_documents)")
+            cols = [row[1] for row in cursor.fetchall()]
+            if 'receiver_info' not in cols:
+                cursor.execute("ALTER TABLE receive_documents ADD COLUMN receiver_info TEXT DEFAULT ''")
+                print("✅ 已为 receive_documents 补充 receiver_info 字段")
+        except Exception as e:
+            print(f"⚠️ 补充字段失败: {e}")
         
         conn.commit()
         conn.close()
@@ -176,6 +199,20 @@ class DatabaseManager:
     def hash_password(self, password):
         """密码哈希"""
         return hashlib.sha256(password.encode()).hexdigest()
+
+    # ============================================================================================ #
+    def set_working_year(self, year: str):
+        """管理员设置全局工作年份"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO system_config (config_key, config_value)
+                VALUES ('working_year', ?)
+            """, (str(year),))
+            conn.commit()
+            return True
+
+    # ============================================================================================ #
     
     @contextmanager
     def get_connection(self):
@@ -341,6 +378,48 @@ class DatabaseManager:
     def create_document(self, document_data, user_id):
         """创建收文记录（兼容旧方法）"""
         return self.create_receive_document(document_data, user_id)
+
+    # ============================================================================================ #
+    def _generate_next_doc_no(self, document_type_name: str) -> str:
+        """
+        TODO 生成下一个文号
+        :param document_type_name: 用户选择的文种，如 '政府文件', '内部通知'
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # 1. 获取管理员设置的当前工作年份
+            cursor.execute("SELECT config_value FROM system_config WHERE config_key = 'working_year'")
+            row = cursor.fetchone()
+            working_year = row['config_value'] if row else str(datetime.now().year)
+
+            # 2. 匹配当前文种和年份的已有最大编号
+            # 假设文号存储格式为: 文种〔2025〕01号
+            pattern = f"{document_type_name}〔{working_year}〕%"
+            cursor.execute("""
+                SELECT document_no FROM receive_documents 
+                WHERE document_no LIKE ? 
+                ORDER BY document_no DESC LIMIT 1
+            """, (pattern,))
+
+            last_doc = cursor.fetchone()
+
+            if last_doc:
+                # 提取序号：从 "文种〔2025〕05号" 中提取 "05"
+                import re
+                last_no_str = last_doc['document_no']
+                match = re.search(r'〕(\d+)号', last_no_str)
+                if match:
+                    next_val = int(match.group(1)) + 1
+                else:
+                    next_val = 1
+            else:
+                # 该文种在该年份的第一份文件
+                next_val = 1
+
+            # 3. 格式化为两位数（01, 02...），如果超过99会自动变为三位数
+            return f"{document_type_name}〔{working_year}〕{next_val:02d}号"
+    # ============================================================================================ #
     
     def create_receive_document(self, document_data, user_id):
         """创建收文记录"""
@@ -349,10 +428,11 @@ class DatabaseManager:
             
             # 检查文号是否已存在
             if document_data.get('document_no'):
-                cursor.execute("SELECT id FROM receive_documents WHERE document_no = ?", 
+                cursor.execute("SELECT id FROM receive_documents WHERE document_no = ?",
                              (document_data.get('document_no'),))
                 if cursor.fetchone():
                     return False, "文号已存在", None
+
             
             # 准备插入数据
             columns = ['title', 'user_id', 'created_by', 'created_at', 'updated_at', 'status']
@@ -379,7 +459,8 @@ class DatabaseManager:
                 'original_file_path': 'original_file_path',
                 'content_summary': 'content_summary',
                 'keywords': 'keywords',
-                'remarks': 'remarks'
+                'remarks': 'remarks',
+                'receiver_info': 'receiver_info'
             }
             
             for field, db_field in field_mapping.items():
@@ -412,7 +493,33 @@ class DatabaseManager:
                 return False, f"数据库错误: {e}", None
             except Exception as e:
                 return False, f"保存失败: {e}", None
-    
+
+    def update_document_receiver(self, doc_id: int, receiver_info: str, user_id: int):
+        """
+            TODO 专门用于更新取件人信息的接口
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute("""
+                    UPDATE receive_documents 
+                    SET receiver_info = ?, updated_at = ? 
+                    WHERE id = ?
+                """, (receiver_info, datetime.now(), doc_id))
+
+                # 记录到日志中，方便追溯
+                cursor.execute("""
+                    INSERT INTO document_logs 
+                    (document_id, document_type, user_id, action, action_details, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (doc_id, 'receive', user_id, 'update_receiver', f'录入取件人: {receiver_info}', datetime.now()))
+
+                conn.commit()
+                return cursor.rowcount > 0, "取件人信息更新成功"
+            except Exception as e:
+                return False, f"录入失败: {e}"
+
+
     def search_documents(self, filters=None, page=1, page_size=20):
         """搜索公文（兼容旧方法）"""
         return self.search_receive_documents(filters, page, page_size)
@@ -490,13 +597,18 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # 检查文号是否已存在
-            if send_data.get('document_no'):
-                cursor.execute("SELECT id FROM send_documents WHERE document_no = ?", 
-                             (send_data.get('document_no'),))
-                if cursor.fetchone():
-                    return False, "文号已存在", None
-            
+            # # 检查文号是否已存在
+            # if send_data.get('document_no'):
+            #     cursor.execute("SELECT id FROM send_documents WHERE document_no = ?",
+            #                  (send_data.get('document_no'),))
+            #     if cursor.fetchone():
+            #         return False, "文号已存在", None
+
+            # TODO 自动设置文号
+            doc_type = send_data.get('document_type', '公文')  # 默认分类
+            send_data['document_no'] = self._generate_next_doc_no(doc_type)
+
+
             # 验证必填字段
             if not send_data.get('title'):
                 return False, "标题不能为空", None
