@@ -49,3 +49,4 @@ def format_document_export(doc: dict) -> str:
     lines.append(f"导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("=" * 50)
     return "\n".join(lines)
+
