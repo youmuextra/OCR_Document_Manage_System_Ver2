@@ -111,3 +111,4 @@ class CameraDialog(QDialog):
         if self.timer.isActive():
             self.timer.stop()
         super().closeEvent(event)
+
