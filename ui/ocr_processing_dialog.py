@@ -486,27 +486,17 @@ class OCRProcessingDialog(QDialog):
             return f"=== {file_name} ===\n⚠️ 尚未识别"
 
         raw = (res.get('raw_text') or '').strip()
-        char_count = len(raw)
-        line_count = len(raw.split('\n')) if raw else 0
+        doc_info = res.get('document_info', {}) or {}
         info_text = f"=== {file_name} ===\n"
-        info_text += f"引擎: {res.get('engine', '未知')}\n"
-        info_text += f"处理时间: {res.get('processing_time', 0):.2f}秒\n"
-        info_text += f"字符数: {char_count}\n"
-        info_text += f"行数: {line_count}\n"
-        q_warnings = res.get('quality_warnings') or (res.get('original_result', {}) or {}).get('quality_warnings') or []
-        if q_warnings:
-            info_text += "\n--- 质量提示（建议重拍/重选）---\n"
-            info_text += "\n".join([f"- {w}" for w in q_warnings]) + "\n"
-        red_text = (res.get('original_result', {}) or {}).get('red_text', '')
-        black_text = (res.get('original_result', {}) or {}).get('black_text', '')
-        if red_text or black_text:
-            info_text += "\n--- 红色文字 ---\n"
-            info_text += (red_text if red_text else "[未识别到红色文字]")
-            info_text += "\n\n--- 黑色文字 ---\n"
-            info_text += (black_text if black_text else "[未识别到黑色文字]")
-        else:
-            info_text += "\n--- 识别文本 ---\n"
-            info_text += raw if raw else "⚠️ 未识别到文本内容"
+        info_text += "提取结果：\n"
+        info_text += f"文号: {doc_info.get('document_no', '')}\n"
+        info_text += f"标题: {doc_info.get('title', '')}\n"
+        info_text += f"发文单位: {doc_info.get('issuing_unit', '')}\n"
+        info_text += f"密级: {doc_info.get('security_level', '')}\n"
+        info_text += f"紧急程度: {doc_info.get('urgency_level', '')}\n"
+        info_text += f"收文时间: {doc_info.get('received_date', '')}\n"
+        if not any([doc_info.get('document_no'), doc_info.get('title'), doc_info.get('issuing_unit')]):
+            info_text += "⚠️ 未提取到关键字段，请检查原图质量后重试\n"
         return info_text
 
     def load_cached_results(self, selected_paths, results_list):
