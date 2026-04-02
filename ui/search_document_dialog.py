@@ -91,11 +91,10 @@ class SearchDocumentDialog(QDialog):
         
         # 结果表格
         self.result_table = QTableWidget()
-        # ✅ 添加序号和ID列，共8列
-        self.result_table.setColumnCount(8)
+        # 仅展示业务字段，不展示内部ID
+        self.result_table.setColumnCount(7)
         self.result_table.setHorizontalHeaderLabels([
             "序号",           # 新增行号
-            "收文ID",         # ✅ 文档ID
             "文号", 
             "标题", 
             "发文单位", 
@@ -107,8 +106,8 @@ class SearchDocumentDialog(QDialog):
         # 设置列宽
         self.result_table.horizontalHeader().setStretchLastSection(True)
         self.result_table.setColumnWidth(0, 60)   # ID列宽度
-        self.result_table.setColumnWidth(1, 120)  # 文号列宽度
-        self.result_table.setColumnWidth(2, 200)  # 标题列宽度
+        self.result_table.setColumnWidth(1, 140)  # 文号列宽度
+        self.result_table.setColumnWidth(2, 220)  # 标题列宽度
         
         layout.addWidget(self.result_table)
         
@@ -175,31 +174,28 @@ class SearchDocumentDialog(QDialog):
             # ✅ 第一列：序号（从1开始）
             self.result_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
 
-            # 第二列：文档ID
-            self.result_table.setItem(i, 1, QTableWidgetItem(str(doc.get('id', ''))))
+            # 第二列：文号
+            self.result_table.setItem(i, 1, QTableWidgetItem(doc.get('document_no', '')))
             
-            # 第三列：文号
-            self.result_table.setItem(i, 2, QTableWidgetItem(doc.get('document_no', '')))
+            # 第三列：标题
+            self.result_table.setItem(i, 2, QTableWidgetItem(doc.get('title', '')))
             
-            # 第四列：标题
-            self.result_table.setItem(i, 3, QTableWidgetItem(doc.get('title', '')))
+            # 第四列：发文单位
+            self.result_table.setItem(i, 3, QTableWidgetItem(doc.get('issuing_unit', '')))
             
-            # 第五列：发文单位
-            self.result_table.setItem(i, 4, QTableWidgetItem(doc.get('issuing_unit', '')))
-            
-            # 第六列：收文日期
+            # 第五列：收文日期
             received_date = doc.get('received_date')
             if received_date and hasattr(received_date, 'strftime'):
                 received_date = received_date.strftime("%Y-%m-%d")
-            self.result_table.setItem(i, 5, QTableWidgetItem(str(received_date)))
+            self.result_table.setItem(i, 4, QTableWidgetItem(str(received_date)))
             
-            # 第七列：密级
-            self.result_table.setItem(i, 6, QTableWidgetItem(doc.get('security_level', '')))
+            # 第六列：密级
+            self.result_table.setItem(i, 5, QTableWidgetItem(doc.get('security_level', '')))
             
-            # 第八列：操作
+            # 第七列：操作
             action_button = QPushButton("查看")
             action_button.clicked.connect(lambda checked=False, d=doc: self.on_view_document(d))
-            self.result_table.setCellWidget(i, 7, action_button)
+            self.result_table.setCellWidget(i, 6, action_button)
     
     def on_export(self):
         """导出到Excel"""
