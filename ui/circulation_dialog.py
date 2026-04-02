@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, QDate, Signal
 from datetime import datetime, timedelta
-from providers import get_identity_provider
 
 class CirculationDialog(QDialog):
     """流转管理对话框"""
@@ -25,12 +24,13 @@ class CirculationDialog(QDialog):
         super().__init__(parent)
         self.db_manager = db_manager
         self.current_user = current_user
-        self.identity_provider = get_identity_provider()
         self.universal_query_dialog = None
         self.selected_doc_id = None
         self.selected_doc_type = None  # 'receive' | 'send'
         self.selected_doc_title = ''
         self.selected_doc_no = ''
+        self.selected_return_flow_id = None
+        self.return_row_flow_ids = []
         self.setup_ui()
     
     def setup_ui(self):
@@ -50,11 +50,6 @@ class CirculationDialog(QDialog):
         self.records_tab = QWidget()
         self.setup_records_tab()
         self.tab_widget.addTab(self.records_tab, "流转记录")
-        
-        # 归还管理选项卡
-        self.return_tab = QWidget()
-        self.setup_return_tab()
-        self.tab_widget.addTab(self.return_tab, "归还管理")
         
         layout = QVBoxLayout()
         layout.addWidget(self.tab_widget)
@@ -95,11 +90,16 @@ class CirculationDialog(QDialog):
 
         # 辅助查询（无需关闭当前流转窗口）
         query_id_layout = QHBoxLayout()
-        query_id_layout.addStretch()
         self.quick_query_btn = QPushButton("选择文件(公文查询)")
         self.quick_query_btn.setMaximumWidth(170)
         self.quick_query_btn.clicked.connect(self.on_open_universal_query)
         query_id_layout.addWidget(self.quick_query_btn)
+
+        self.review_receive_btn = QPushButton("回看收文识别内容")
+        self.review_receive_btn.setMaximumWidth(170)
+        self.review_receive_btn.clicked.connect(self.on_review_receive_content)
+        query_id_layout.addWidget(self.review_receive_btn)
+        query_id_layout.addStretch()
         form_layout.addRow("", query_id_layout)
         
         # 流转类型
@@ -108,15 +108,15 @@ class CirculationDialog(QDialog):
         self.circulation_type_combo.currentTextChanged.connect(self._on_circulation_type_changed)
         form_layout.addRow("流转类型*:", self.circulation_type_combo)
         
-        # 下一节点单位
+        # 取件单位
         self.next_unit_input = QLineEdit()
-        self.next_unit_input.setPlaceholderText("请输入下一节点单位")
-        form_layout.addRow("下一节点单位:", self.next_unit_input)
+        self.next_unit_input.setPlaceholderText("请输入取件单位")
+        form_layout.addRow("取件单位*:", self.next_unit_input)
         
-        # 下一节点人员
+        # 取件人
         self.next_person_input = QLineEdit()
-        self.next_person_input.setPlaceholderText("请输入下一节点人员")
-        form_layout.addRow("下一节点人员:", self.next_person_input)
+        self.next_person_input.setPlaceholderText("请输入取件人")
+        form_layout.addRow("取件人*:", self.next_person_input)
         
         # 借阅期限（仅借阅时显示）
         self.due_date_input = QDateEdit()
@@ -192,6 +192,29 @@ class CirculationDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "提示", f"打开公文查询失败: {e}")
 
+    def on_review_receive_content(self):
+        """回看收文识别内容：打开已缓存的收文登记窗口。"""
+        parent = self.parent()
+        receive_dialog = None
+        try:
+            if parent and hasattr(parent, 'workflow_dialogs'):
+                receive_dialog = parent.workflow_dialogs.get('receive')
+        except Exception:
+            receive_dialog = None
+
+        if receive_dialog is None:
+            QMessageBox.information(self, "提示", "当前没有可回看的收文识别内容。\n请先进入收文管理完成识别。")
+            return
+
+        try:
+            receive_dialog.setModal(False)
+            receive_dialog.setWindowModality(Qt.NonModal)
+            receive_dialog.show()
+            receive_dialog.raise_()
+            receive_dialog.activateWindow()
+        except Exception as e:
+            QMessageBox.warning(self, "提示", f"打开收文回看窗口失败: {e}")
+
     def on_query_record_selected(self, record: dict):
         """接收通用查询双击结果并自动回填到流转表单。"""
         try:
@@ -212,20 +235,20 @@ class CirculationDialog(QDialog):
                 self.selected_doc_type = 'receive'
                 self.selected_doc_title = rec_title
                 self.selected_doc_no = rec_no
-                self.doc_pick_display.setText(f"收文ID={recv_id}  文号={rec_no}  标题={rec_title}")
-                self.status_label.setText(f"已选择收文记录: {recv_id}")
+                self.doc_pick_display.setText(f"文号={rec_no}  标题={rec_title}")
+                self.status_label.setText(f"已选择收文：{rec_no or rec_title}")
             elif send_id:
                 self.doc_type_combo.setCurrentText("发文")
                 self.selected_doc_id = int(send_id)
                 self.selected_doc_type = 'send'
                 self.selected_doc_title = rec_title
                 self.selected_doc_no = rec_no
-                self.doc_pick_display.setText(f"发文ID={send_id}  文号={rec_no}  标题={rec_title}")
-                self.status_label.setText(f"已选择发文记录: {send_id}")
+                self.doc_pick_display.setText(f"文号={rec_no}  标题={rec_title}")
+                self.status_label.setText(f"已选择发文：{rec_no or rec_title}")
             else:
-                self.status_label.setText("选中记录未包含可回填的文档ID")
+                self.status_label.setText("选中记录未包含可用文号")
         except Exception as e:
-            QMessageBox.warning(self, "提示", f"回填ID失败: {e}")
+            QMessageBox.warning(self, "提示", f"回填失败: {e}")
     
     def setup_records_tab(self):
         """设置流转记录选项卡"""
@@ -270,15 +293,36 @@ class CirculationDialog(QDialog):
         
         # 结果表格
         self.result_table = QTableWidget()
-        self.result_table.setColumnCount(11)
+        self.result_table.setColumnCount(9)
         self.result_table.setHorizontalHeaderLabels([
-            "流转ID", "文档类型", "收文ID", "发文ID", "文号", "标题", "流转类型", "下一节点", "状态", "创建时间", "操作"
+            "文档类型", "文号", "标题", "流转类型", "取件信息", "状态", "发起流转时间", "领取时间", "操作"
         ])
+        header_tips = {
+            "发起流转时间": "该流转记录创建（发起）的时间（精确到秒）。",
+            "领取时间": "收件人/取件人实际领取（取走）的时间（精确到秒）。",
+        }
+        for i in range(self.result_table.columnCount()):
+            item = self.result_table.horizontalHeaderItem(i)
+            if item and item.text() in header_tips:
+                item.setToolTip(header_tips[item.text()])
         self.result_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.result_table.horizontalHeader().setStretchLastSection(True)
+        header = self.result_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(QHeaderView.Interactive)
+
+        # 关键列固定宽度，避免文号被压缩显示为省略号
+        self.result_table.setColumnWidth(0, 90)   # 文档类型
+        self.result_table.setColumnWidth(1, 220)  # 文号
+        self.result_table.setColumnWidth(2, 220)  # 标题
+        self.result_table.setColumnWidth(3, 90)   # 流转类型
+        self.result_table.setColumnWidth(4, 180)  # 取件信息
+        self.result_table.setColumnWidth(5, 180)  # 状态
+        self.result_table.setColumnWidth(6, 170)  # 发起流转时间
+        self.result_table.setColumnWidth(7, 170)  # 领取时间
+        self.result_table.setColumnWidth(8, 90)   # 操作
         layout.addWidget(self.result_table)
 
-        hint = QLabel("提示：在本页查询后，状态为“待确认”的记录可在“操作”列点击“确认领取”。")
+        hint = QLabel("提示：本页仅用于查询与查看流转记录详情；取件/归还请在“取件登记与查询”模块办理。")
         hint.setStyleSheet("color: #666;")
         layout.addWidget(hint)
         
@@ -308,25 +352,20 @@ class CirculationDialog(QDialog):
         self.return_search_btn.clicked.connect(self.on_return_search)
         form_layout.addRow("", self.return_search_btn)
         
-        # 当前选中的流转记录ID
-        self.return_id_input = QLineEdit()
-        self.return_id_input.setPlaceholderText("请输入流转ID")
-        form_layout.addRow("流转ID*:", self.return_id_input)
-        
         form_group.setLayout(form_layout)
         layout.addWidget(form_group)
 
         self.return_result_table = QTableWidget()
-        self.return_result_table.setColumnCount(10)
+        self.return_result_table.setColumnCount(7)
         self.return_result_table.setHorizontalHeaderLabels([
-            "流转ID", "文档类型", "收文ID", "发文ID", "文号", "标题", "下一节点", "状态", "应还日期", "操作"
+            "文档类型", "文号", "标题", "取件信息", "状态", "应还日期", "操作"
         ])
         self.return_result_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.return_result_table.horizontalHeader().setStretchLastSection(True)
         self.return_result_table.cellDoubleClicked.connect(self.on_return_row_double_clicked)
         layout.addWidget(self.return_result_table)
 
-        return_hint = QLabel("提示：双击列表可查看详情并自动回填流转ID；仅状态为“已借出”的借阅记录可确认归还。")
+        return_hint = QLabel("提示：双击列表可查看详情并自动选中该记录；仅状态为“已借出”的借阅记录可确认归还。")
         return_hint.setStyleSheet("color: #666;")
         layout.addWidget(return_hint)
         
@@ -362,19 +401,31 @@ class CirculationDialog(QDialog):
         if self.selected_doc_type != expected:
             QMessageBox.warning(self, "警告", "当前文档类型与已选公文不一致，请重新选择目标公文")
             return
+
+        pickup_unit = self.next_unit_input.text().strip()
+        pickup_person = self.next_person_input.text().strip()
+        if not pickup_unit:
+            QMessageBox.warning(self, "警告", "取件单位不能为空")
+            return
+        if not pickup_person:
+            QMessageBox.warning(self, "警告", "取件人不能为空")
+            return
+
+        circ_type = self.circulation_type_combo.currentText().strip()
+        init_status = '已借出' if circ_type == '借阅' else '已流转'
     
         # 准备数据
         circulation_data = {
             'document_id': self.selected_doc_id,
             'document_type': self.selected_doc_type,
-            'circulation_type': self.circulation_type_combo.currentText(),
-            'next_node_unit': self.next_unit_input.text().strip(),
-            'next_node_person': self.next_person_input.text().strip(),
+            'circulation_type': circ_type,
+            'next_node_unit': pickup_unit,
+            'next_node_person': pickup_person,
             'current_holder_id': self.current_user['id'],
-            'borrow_requester_id': self.current_user['id'] if self.circulation_type_combo.currentText() == '借阅' else None,
-            'borrow_date': datetime.now() if self.circulation_type_combo.currentText() == '借阅' else None,
-            'due_date': self.due_date_input.date().toPython() if self.circulation_type_combo.currentText() == '借阅' else None,
-            'status': '待确认',
+            'borrow_requester_id': self.current_user['id'] if circ_type == '借阅' else None,
+            'borrow_date': datetime.now() if circ_type == '借阅' else None,
+            'due_date': self.due_date_input.date().toPython() if circ_type == '借阅' else None,
+            'status': init_status,
             'remarks': self.remarks_input.toPlainText().strip()
         }
     
@@ -388,9 +439,9 @@ class CirculationDialog(QDialog):
             )
         
             if success:
-                QMessageBox.information(self, "成功", f"流转记录创建成功！\n流转ID: {circ_id}")
+                QMessageBox.information(self, "成功", f"流转记录创建成功！\n文号: {self.selected_doc_no or '未识别'}")
                 self.on_clear()
-                self.status_label.setText(f"流转记录已创建，ID: {circ_id}")
+                self.status_label.setText(f"流转记录已创建，文号: {self.selected_doc_no or '未识别'}")
                 # 整个流程结束
                 try:
                     self.workflow_finished.emit()
@@ -498,6 +549,14 @@ class CirculationDialog(QDialog):
         return out
     def display_results(self, records):
         """显示查询结果"""
+        def fmt_dt(v):
+            if not v:
+                return ""
+            if hasattr(v, 'strftime'):
+                return v.strftime("%Y-%m-%d %H:%M:%S")
+            s = str(v).replace('T', ' ').strip()
+            return s[:19] if len(s) >= 19 else s
+
         if not isinstance(records, list):
             records = []
         self.result_table.setRowCount(len(records))
@@ -505,100 +564,69 @@ class CirculationDialog(QDialog):
             id_text = ""
             action_button = None
             if not isinstance(record, dict):
-                for col in range(10):
+                for col in range(8):
                     self.result_table.setItem(i, col, QTableWidgetItem(""))
                 action_button = QPushButton("无效数据")
                 action_button.setEnabled(False)
-                self.result_table.setCellWidget(i, 10, action_button)
+                self.result_table.setCellWidget(i, 8, action_button)
                 continue
             flow_id = record.get('id')
             if flow_id is None or flow_id == '':
-                id_text = "无ID"
-                action_button = QPushButton("无ID")
+                action_button = QPushButton("无记录")
                 action_button.setEnabled(False)
             else:
                 try:
                     flow_id_int = int(flow_id)
-                    id_text = str(flow_id_int)
-                    # 待确认状态支持一键“确认领取”，其余状态默认“查看”
-                    if str(record.get('status', '')) == '待确认':
-                        action_button = QPushButton("确认领取")
-                        def create_confirm_handler(record_id, rec):
-                            return lambda: self.on_confirm_receive(record_id, rec)
-                        action_button.clicked.connect(create_confirm_handler(flow_id_int, dict(record)))
-                    else:
-                        action_button = QPushButton("查看")
-                        def create_click_handler(record_id):
-                            return lambda: self.on_view_record(record_id)
-                        action_button.clicked.connect(create_click_handler(flow_id_int))
+                    action_button = QPushButton("查看")
+                    def create_click_handler(record_id):
+                        return lambda: self.on_view_record(record_id)
+                    action_button.clicked.connect(create_click_handler(flow_id_int))
                 except (ValueError, TypeError):
-                    id_text = "无效ID"
-                    action_button = QPushButton("无效ID")
+                    action_button = QPushButton("无效记录")
                     action_button.setEnabled(False)
             # 填充列
-            self.result_table.setItem(i, 0, QTableWidgetItem(id_text))
-
-            # 第1列：文档类型
+            # 第0列：文档类型
             doc_type = record.get('document_type', '')
             doc_type_text = '收文' if str(doc_type) == 'receive' else ('发文' if str(doc_type) == 'send' else str(doc_type))
-            self.result_table.setItem(i, 1, QTableWidgetItem(doc_type_text))
+            self.result_table.setItem(i, 0, QTableWidgetItem(doc_type_text))
 
-            # 第2-3列：收文ID/发文ID，避免“文档ID”歧义
-            self.result_table.setItem(i, 2, QTableWidgetItem(str(record.get('receive_id', '') or '')))
-            self.result_table.setItem(i, 3, QTableWidgetItem(str(record.get('send_id', '') or '')))
+            # 第1-2列：文号/标题
+            doc_no_text = str(record.get('document_no', '') or '')
+            title_text = str(record.get('title', '') or '')
+            doc_no_item = QTableWidgetItem(doc_no_text)
+            title_item = QTableWidgetItem(title_text)
+            doc_no_item.setToolTip(doc_no_text)
+            title_item.setToolTip(title_text)
+            self.result_table.setItem(i, 1, doc_no_item)
+            self.result_table.setItem(i, 2, title_item)
 
-            # 第4-5列：文号/标题
-            self.result_table.setItem(i, 4, QTableWidgetItem(str(record.get('document_no', '') or '')))
-            self.result_table.setItem(i, 5, QTableWidgetItem(str(record.get('title', '') or '')))
-
-            # 第6列：流转类型
+            # 第3列：流转类型
             circ_type = record.get('circulation_type', '')
-            self.result_table.setItem(i, 6, QTableWidgetItem(str(circ_type)))
+            self.result_table.setItem(i, 3, QTableWidgetItem(str(circ_type)))
 
-            # 第7列：下一节点
+            # 第4列：下一节点
             next_unit = record.get('next_node_unit', '')
             next_person = record.get('next_node_person', '')
             next_node = f"{next_unit}/{next_person}" if next_unit or next_person else ""
-            self.result_table.setItem(i, 7, QTableWidgetItem(next_node))
+            self.result_table.setItem(i, 4, QTableWidgetItem(next_node))
 
-            # 第8列：状态
+            # 第5列：状态
             status = record.get('status', '')
-            self.result_table.setItem(i, 8, QTableWidgetItem(str(status)))
+            self.result_table.setItem(i, 5, QTableWidgetItem(str(status)))
 
-            # 第9列：创建时间
-            created_at = record.get('created_at', '')
-            created_at_str = ""
-            if created_at:
-                try:
-                    if hasattr(created_at, 'strftime'):
-                        # 已经是datetime对象
-                        created_at_str = created_at.strftime("%Y-%m-%d %H:%M")
-                    elif isinstance(created_at, str):
-                        # 尝试解析字符串
-                        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
-                            try:
-                                from datetime import datetime
-                                dt = datetime.strptime(created_at, fmt)
-                                created_at_str = dt.strftime("%Y-%m-%d %H:%M")
-                                break
-                            except ValueError:
-                                continue
-                        else:
-                            created_at_str = str(created_at)
-                    else:
-                        created_at_str = str(created_at)
-                except Exception as e:
-                    print(f"[WARNING] 解析创建时间失败: {created_at}, 错误: {e}")
-                    created_at_str = str(created_at)
+            # 第6列：发起流转时间（原创建时间）
+            self.result_table.setItem(i, 6, QTableWidgetItem(fmt_dt(record.get('created_at', ''))))
 
-            self.result_table.setItem(i, 9, QTableWidgetItem(created_at_str))
+            # 第7列：领取时间
+            pickup_time = record.get('pickup_time', '') or record.get('borrow_date', '')
+            self.result_table.setItem(i, 7, QTableWidgetItem(fmt_dt(pickup_time)))
 
-            # 第10列：操作按钮
+            # 第8列：操作按钮
             if action_button is None:
                 action_button = QPushButton("无操作")
                 action_button.setEnabled(False)
 
-            self.result_table.setCellWidget(i, 10, action_button)
+            self.result_table.setCellWidget(i, 8, action_button)
 
     def on_return_search(self):
         """归还页按文号搜索可归还的借阅流转记录。"""
@@ -632,19 +660,18 @@ class CirculationDialog(QDialog):
             QMessageBox.critical(self, '错误', f'归还搜索失败: {e}')
 
     def _display_return_results(self, records):
+        self.return_row_flow_ids = []
         self.return_result_table.setRowCount(len(records))
         for i, record in enumerate(records):
             flow_id = record.get('id', '')
+            self.return_row_flow_ids.append(flow_id)
             doc_type = '收文' if str(record.get('document_type')) == 'receive' else '发文'
-            self.return_result_table.setItem(i, 0, QTableWidgetItem(str(flow_id)))
-            self.return_result_table.setItem(i, 1, QTableWidgetItem(doc_type))
-            self.return_result_table.setItem(i, 2, QTableWidgetItem(str(record.get('receive_id', '') or '')))
-            self.return_result_table.setItem(i, 3, QTableWidgetItem(str(record.get('send_id', '') or '')))
-            self.return_result_table.setItem(i, 4, QTableWidgetItem(str(record.get('document_no', '') or '')))
-            self.return_result_table.setItem(i, 5, QTableWidgetItem(str(record.get('title', '') or '')))
+            self.return_result_table.setItem(i, 0, QTableWidgetItem(doc_type))
+            self.return_result_table.setItem(i, 1, QTableWidgetItem(str(record.get('document_no', '') or '')))
+            self.return_result_table.setItem(i, 2, QTableWidgetItem(str(record.get('title', '') or '')))
             next_node = f"{record.get('next_node_unit', '')}/{record.get('next_node_person', '')}".strip('/')
-            self.return_result_table.setItem(i, 6, QTableWidgetItem(next_node))
-            self.return_result_table.setItem(i, 7, QTableWidgetItem(str(record.get('status', '') or '')))
+            self.return_result_table.setItem(i, 3, QTableWidgetItem(next_node))
+            self.return_result_table.setItem(i, 4, QTableWidgetItem(str(record.get('status', '') or '')))
 
             due_date = record.get('due_date', '')
             due_date_str = ''
@@ -653,24 +680,23 @@ class CirculationDialog(QDialog):
                     due_date_str = due_date.strftime('%Y-%m-%d')
                 else:
                     due_date_str = str(due_date)
-            self.return_result_table.setItem(i, 8, QTableWidgetItem(due_date_str))
+            self.return_result_table.setItem(i, 5, QTableWidgetItem(due_date_str))
 
             btn = QPushButton('选择此记录')
             btn.setEnabled(str(record.get('status', '')) == '已借出')
             btn.clicked.connect(lambda _=False, fid=flow_id: self._select_return_flow_id(fid))
-            self.return_result_table.setCellWidget(i, 9, btn)
+            self.return_result_table.setCellWidget(i, 6, btn)
 
     def _select_return_flow_id(self, flow_id):
-        self.return_id_input.setText(str(flow_id))
-        self.return_status_label.setText(f'已选择待归还流转ID: {flow_id}')
+        self.selected_return_flow_id = flow_id
+        self.return_status_label.setText('已选择待归还记录')
 
     def on_return_row_double_clicked(self, row, _column):
-        """归还管理中双击查看详情，同时回填流转ID。"""
+        """归还管理中双击查看详情，同时选中该记录。"""
         try:
-            item = self.return_result_table.item(row, 0)
-            if not item:
+            if row < 0 or row >= len(self.return_row_flow_ids):
                 return
-            flow_id = str(item.text()).strip()
+            flow_id = str(self.return_row_flow_ids[row]).strip()
             if not flow_id:
                 return
             self._select_return_flow_id(flow_id)
@@ -678,33 +704,6 @@ class CirculationDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, '提示', f'打开流转详情失败: {e}')
 
-    def on_confirm_receive(self, flow_id, record):
-        """领用人现场确认（读卡器集成前采用人工确认按钮）。"""
-        try:
-            circ_type = str(record.get('circulation_type', ''))
-            next_status = '已借出' if circ_type == '借阅' else '已流转'
-
-            ok, msg, _identity_info = self.identity_provider.confirm_identity(
-                parent=self,
-                expected_user=self.current_user,
-                scene=f"流转ID={flow_id}，目标状态={next_status}",
-            )
-            if not ok:
-                self.status_label.setText(f"身份确认未通过: {msg}")
-                return
-
-            success, message = self.db_manager.update_circulation_status(
-                int(flow_id), next_status, self.current_user['id']
-            )
-            if success:
-                self.status_label.setText(f"流转ID {flow_id} 已确认领取，状态：{next_status}")
-                self.on_query()
-            else:
-                QMessageBox.warning(self, "失败", message)
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"确认领取失败: {e}")
-
-            
     def on_view_record(self, flow_id):
         """查看流转记录详情"""
         try:
@@ -713,7 +712,7 @@ class CirculationDialog(QDialog):
             
             # 验证ID
             if flow_id is None or flow_id is False or (isinstance(flow_id, bool) and not flow_id):
-                QMessageBox.warning(self, "警告", f"无效的流转ID: {flow_id} (类型: {type(flow_id)})")
+                QMessageBox.warning(self, "警告", "无效的流转记录")
                 return
             
             # 确保flow_id是整数
@@ -721,7 +720,7 @@ class CirculationDialog(QDialog):
                 flow_id_int = int(flow_id)
                 print(f"[DEBUG] 转换后的flow_id_int: {flow_id_int}")
             except (ValueError, TypeError) as e:
-                QMessageBox.warning(self, "警告", f"流转ID必须是数字: {flow_id} (类型: {type(flow_id)})")
+                QMessageBox.warning(self, "警告", "无效的流转记录")
                 return
             
             # 查询数据库
@@ -734,17 +733,7 @@ class CirculationDialog(QDialog):
                 # ✅ 构建详情信息
                 detail_text = f"📄 流转记录详情\n"
                 detail_text += f"════════════════════\n"
-                detail_text += f"流转ID: {record.get('id', '未知')}\n"
                 detail_text += f"文档类型: {record.get('document_type', '未知')}\n"
-                # 根据类型展示更明确的字段名
-                dtype = record.get('document_type', '')
-                did = record.get('document_id', '未知')
-                if dtype == 'receive':
-                    detail_text += f"收文ID: {did}\n"
-                elif dtype == 'send':
-                    detail_text += f"发文ID: {did}\n"
-                else:
-                    detail_text += f"文档ID: {did}\n"
                 if record.get('document_no'):
                     detail_text += f"文号: {record.get('document_no')}\n"
                 if record.get('title'):
@@ -756,7 +745,7 @@ class CirculationDialog(QDialog):
                 next_node_unit = record.get('next_node_unit', '')
                 next_node_person = record.get('next_node_person', '')
                 if next_node_unit or next_node_person:
-                    detail_text += f"下一节点: {next_node_unit}/{next_node_person}\n"
+                    detail_text += f"取件信息: {next_node_unit}/{next_node_person}\n"
                 
                 # 当前持有人
                 current_holder = record.get('current_holder_name', '')
@@ -799,7 +788,7 @@ class CirculationDialog(QDialog):
                 
             else:
                 print(f"[DEBUG] 查询失败: {message}")
-                QMessageBox.warning(self, "警告", f"未找到流转记录\nID: {flow_id_int}\n{message}")
+                QMessageBox.warning(self, "警告", f"未找到流转记录\n{message}")
                     
         except Exception as e:
             print(f"[ERROR] 查看流转记录失败: {e}")
@@ -809,22 +798,17 @@ class CirculationDialog(QDialog):
     
     def on_return(self):
         """确认归还"""
-        circ_id = self.return_id_input.text().strip()
-        if not circ_id:
-            QMessageBox.warning(self, "警告", "流转ID不能为空")
+        if self.selected_return_flow_id in (None, '', False):
+            QMessageBox.warning(self, "警告", "请先在列表中选择要归还的记录")
             return
-        
-        try:
-            circ_id = int(circ_id)
-        except ValueError:
-            QMessageBox.warning(self, "警告", "流转ID必须是数字")
-            return
+
+        circ_id = int(self.selected_return_flow_id)
         
         # 确认对话框
         reply = QMessageBox.question(
             self, 
             "确认归还", 
-            f"确认归还流转 ID: {circ_id} 吗？",
+            "确认归还当前选中记录吗？",
             QMessageBox.Yes | QMessageBox.No
         )
         
@@ -833,7 +817,7 @@ class CirculationDialog(QDialog):
                 # 仅借阅类型允许归还
                 ok_rec, msg_rec, rec = self.db_manager.get_circulation_by_id(circ_id)
                 if not ok_rec or not rec:
-                    QMessageBox.warning(self, "失败", f"未找到流转记录: {circ_id}")
+                    QMessageBox.warning(self, "失败", "未找到对应流转记录")
                     return
                 if str(rec.get('circulation_type', '')) != '借阅':
                     QMessageBox.warning(self, "失败", "仅“借阅”类型支持归还确认")
@@ -846,9 +830,9 @@ class CirculationDialog(QDialog):
                 )
                 
                 if success:
-                    QMessageBox.information(self, "成功", f"归还成功！\n流转ID: {circ_id}")
-                    self.return_id_input.clear()
-                    self.return_status_label.setText(f"已归还流转 ID: {circ_id}")
+                    QMessageBox.information(self, "成功", "归还成功！")
+                    self.selected_return_flow_id = None
+                    self.return_status_label.setText("已归还选中记录")
                     self.on_return_search() if self.return_doc_no_input.text().strip() else None
                     self.on_query()
                 else:
