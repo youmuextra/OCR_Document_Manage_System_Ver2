@@ -6,14 +6,15 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
     QLineEdit, QPushButton, QMessageBox, QDateEdit,
-    QFormLayout, QGroupBox, QTextEdit, QComboBox
+    QFormLayout, QGroupBox, QTextEdit, QComboBox, QInputDialog, QMenu
 )
 from PySide6.QtGui import QFont
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QEvent
 from datetime import datetime
 
 class SendDocumentDialog(QDialog):
     """发文管理对话框"""
+    DEFAULT_DOC_TYPES = ["鄂厅发", "鄂厅发电", "鄂厅函", "内部公文"]
     
     def __init__(self, db_manager, current_user, parent=None):
         super().__init__(parent)
@@ -33,10 +34,11 @@ class SendDocumentDialog(QDialog):
         form_layout = QFormLayout()
         form_layout.setSpacing(10)
         
-        # 文号
-        self.doc_no_input = QLineEdit()
-        self.doc_no_input.setPlaceholderText("请输入文号")
-        form_layout.addRow("文号*:", self.doc_no_input)
+        # 文号（自动生成）
+        self.doc_no_preview = QLineEdit()
+        self.doc_no_preview.setReadOnly(True)
+        self.doc_no_preview.setPlaceholderText("系统将自动生成文号")
+        form_layout.addRow("文号(自动):", self.doc_no_preview)
         
         # 标题
         self.title_input = QLineEdit()
@@ -53,10 +55,30 @@ class SendDocumentDialog(QDialog):
         self.send_to_unit_input.setPlaceholderText("请输入发往单位")
         form_layout.addRow("发往单位*:", self.send_to_unit_input)
 
-        # M级（必填）
-        self.m_level_combo = QComboBox()
-        self.m_level_combo.addItems(["请选择M级", "M1", "M2", "M3", "M4"])
-        form_layout.addRow("M级*:", self.m_level_combo)
+        # 密级（必填）
+        self.security_combo = QComboBox()
+        self.security_combo.addItems(["请选择密级", "普通", "秘密", "机密", "绝密"])
+        form_layout.addRow("密级*:", self.security_combo)
+
+        # 文种（用于生成文号，管理员可双击设置）
+        self.document_type_combo = QComboBox()
+        self._reload_doc_type_options()
+        self.document_type_combo.installEventFilter(self)
+        self.document_type_combo.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.document_type_combo.customContextMenuRequested.connect(self._show_doc_type_context_menu)
+        self.document_type_combo.setToolTip("管理员：双击可批量编辑；右键可添加/删除文种")
+        form_layout.addRow("文种*:", self.document_type_combo)
+
+        self.doc_type_help_label = QLabel("提示：管理员可双击文种下拉框批量编辑，右键进行添加/删除。")
+        self.doc_type_help_label.setStyleSheet("color:#666; font-size:12px;")
+        form_layout.addRow("", self.doc_type_help_label)
+
+        # 年份（用于生成文号，管理员可双击设置）
+        self.doc_year_label = QLabel(str(self.db_manager.get_document_number_year()))
+        self.doc_year_label.setStyleSheet("color:#333;")
+        self.doc_year_label.installEventFilter(self)
+        self.doc_year_label.setToolTip("管理员双击可修改文号年份")
+        form_layout.addRow("文号年份:", self.doc_year_label)
         
         # 经办人
         self.processor_input = QLineEdit()
@@ -104,21 +126,168 @@ class SendDocumentDialog(QDialog):
         layout.addWidget(self.status_label)
         
         self.setLayout(layout)
+
+        # 字段变化时预览文号
+        self.title_input.textChanged.connect(self._refresh_doc_no_preview)
+        self.security_combo.currentIndexChanged.connect(self._refresh_doc_no_preview)
+        self.document_type_combo.currentIndexChanged.connect(self._refresh_doc_no_preview)
+        self._refresh_doc_no_preview()
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.MouseButtonDblClick and self.current_user.get('role') == 'admin':
+            if watched is self.document_type_combo:
+                self._edit_doc_types()
+                return True
+            if watched is self.doc_year_label:
+                self._edit_doc_year()
+                return True
+        return super().eventFilter(watched, event)
+
+    def _reload_doc_type_options(self):
+        options = self.db_manager.get_document_type_options()
+        self.document_type_combo.clear()
+        self.document_type_combo.addItems(options)
+
+    def _show_doc_type_context_menu(self, pos):
+        if self.current_user.get('role') != 'admin':
+            return
+
+        menu = QMenu(self)
+        add_action = menu.addAction("添加文种")
+        remove_action = menu.addAction("删除当前文种")
+        menu.addSeparator()
+        reset_action = menu.addAction("重置为默认文种")
+
+        action = menu.exec(self.document_type_combo.mapToGlobal(pos))
+        if action == add_action:
+            self._add_doc_type()
+        elif action == remove_action:
+            self._remove_current_doc_type()
+        elif action == reset_action:
+            self._reset_doc_types()
+
+    def _add_doc_type(self):
+        text, ok = QInputDialog.getText(self, "添加文种", "请输入新的文种名称:")
+        if not ok:
+            return
+        new_type = (text or '').strip()
+        if not new_type:
+            QMessageBox.warning(self, "提示", "文种不能为空")
+            return
+
+        options = self.db_manager.get_document_type_options()
+        if new_type in options:
+            QMessageBox.information(self, "提示", "该文种已存在")
+            return
+
+        options.append(new_type)
+        ok2, msg = self.db_manager.set_document_type_options(options)
+        if ok2:
+            self._reload_doc_type_options()
+            self.document_type_combo.setCurrentText(new_type)
+            self._refresh_doc_no_preview()
+        else:
+            QMessageBox.warning(self, "失败", msg)
+
+    def _remove_current_doc_type(self):
+        current = self.document_type_combo.currentText().strip()
+        if not current:
+            QMessageBox.warning(self, "提示", "当前没有可删除的文种")
+            return
+
+        options = self.db_manager.get_document_type_options()
+        if current not in options:
+            return
+        if len(options) <= 1:
+            QMessageBox.warning(self, "提示", "至少保留一个文种")
+            return
+
+        ok = QMessageBox.question(self, "确认", f"确认删除文种“{current}”吗？")
+        if ok != QMessageBox.Yes:
+            return
+
+        options = [x for x in options if x != current]
+        ok2, msg = self.db_manager.set_document_type_options(options)
+        if ok2:
+            self._reload_doc_type_options()
+            self._refresh_doc_no_preview()
+        else:
+            QMessageBox.warning(self, "失败", msg)
+
+    def _reset_doc_types(self):
+        ok = QMessageBox.question(self, "确认", "确认将文种重置为系统默认项吗？")
+        if ok != QMessageBox.Yes:
+            return
+
+        ok2, msg = self.db_manager.set_document_type_options(self.DEFAULT_DOC_TYPES)
+        if ok2:
+            self._reload_doc_type_options()
+            self._refresh_doc_no_preview()
+            QMessageBox.information(self, "成功", "文种已重置为默认项")
+        else:
+            QMessageBox.warning(self, "失败", msg)
+
+    def _edit_doc_types(self):
+        current = '，'.join(self.db_manager.get_document_type_options())
+        text, ok = QInputDialog.getText(self, "设置文种", "请输入文种（中文逗号分隔）:", text=current)
+        if not ok:
+            return
+
+        text = str(text or '').strip()
+        if ',' in text:
+            QMessageBox.warning(self, "提示", "请使用中文逗号（，）分隔文种，不要使用英文逗号（,）。")
+            return
+
+        options = [x.strip() for x in text.split('，') if x.strip()]
+        if not options:
+            QMessageBox.warning(self, "提示", "文种不能为空")
+            return
+
+        ok2, msg = self.db_manager.set_document_type_options(options)
+        if ok2:
+            self._reload_doc_type_options()
+            self._refresh_doc_no_preview()
+        else:
+            QMessageBox.warning(self, "失败", msg)
+
+    def _edit_doc_year(self):
+        cur = self.db_manager.get_document_number_year()
+        # 兼容 PySide6：使用位置参数（value, min, max, step），避免关键字参数不被支持
+        year, ok = QInputDialog.getInt(self, "设置年份", "请输入文号年份:", cur, 2000, 2100, 1)
+        if not ok:
+            return
+        ok2, msg = self.db_manager.set_document_number_year(year)
+        if ok2:
+            self.doc_year_label.setText(str(year))
+            self._refresh_doc_no_preview()
+        else:
+            QMessageBox.warning(self, "失败", msg)
+
+    def _refresh_doc_no_preview(self):
+        title = self.title_input.text().strip()
+        security = self.security_combo.currentText().strip()
+        doc_type = self.document_type_combo.currentText().strip()
+        if not title or security in ("", "请选择密级") or not doc_type:
+            self.doc_no_preview.setText("")
+            return
+        year = self.db_manager.get_document_number_year()
+        ok, msg, doc_no = self.db_manager.generate_document_no(doc_type, year)
+        if ok:
+            self.doc_no_preview.setText(doc_no)
+        else:
+            self.doc_no_preview.setText("")
     
     def on_save(self):
         """保存发文记录"""
         # 获取表单数据
-        doc_no = self.doc_no_input.text().strip()
+        doc_no = self.doc_no_preview.text().strip()
         title = self.title_input.text().strip()
         send_to_unit = self.send_to_unit_input.text().strip()
         processor = self.processor_input.text().strip()
-        m_level = self.m_level_combo.currentText().strip()
+        security_level = self.security_combo.currentText().strip()
+        document_type = self.document_type_combo.currentText().strip()
     
         # 验证必填字段
-        if not doc_no:
-            QMessageBox.warning(self, "警告", "文号不能为空")
-            return
-    
         if not title:
             QMessageBox.warning(self, "警告", "标题不能为空")
             return
@@ -131,9 +300,22 @@ class SendDocumentDialog(QDialog):
             QMessageBox.warning(self, "警告", "经办人不能为空")
             return
 
-        if not m_level or m_level == "请选择M级":
-            QMessageBox.warning(self, "警告", "M级不能为空")
+        if not security_level or security_level == "请选择密级":
+            QMessageBox.warning(self, "警告", "密级不能为空")
             return
+
+        if not document_type:
+            QMessageBox.warning(self, "警告", "文种不能为空")
+            return
+
+        year = self.db_manager.get_document_number_year()
+        if not doc_no:
+            ok, msg, generated_no = self.db_manager.generate_document_no(document_type, year)
+            if not ok:
+                QMessageBox.warning(self, "警告", msg)
+                return
+            doc_no = generated_no
+            self.doc_no_preview.setText(doc_no)
     
         # 准备数据
         send_data = {
@@ -141,8 +323,10 @@ class SendDocumentDialog(QDialog):
             'title': title,
             'issuing_unit': self.issuing_unit_input.text().strip(),
             'send_to_unit': send_to_unit,
-            'm_level': m_level,
+            'security_level': security_level,
+            'document_type': document_type,
             'processor': processor,
+            'doc_year': year,
             'send_date': self.send_date_input.date().toPython(),
             'remarks': self.remarks_input.toPlainText().strip()
         }
@@ -159,10 +343,10 @@ class SendDocumentDialog(QDialog):
             )
         
             if success:
-                QMessageBox.information(self, "成功", f"发文记录保存成功！\n发文ID: {doc_id}\n文号: {doc_no}")
+                QMessageBox.information(self, "成功", f"发文记录保存成功！\n文号: {doc_no}")
                 # 不清空表单，以便用户在流程结束前查看内容
                 # self.on_clear()
-                self.status_label.setText(f"发文记录已保存，ID: {doc_id}")
+                self.status_label.setText(f"发文记录已保存，文号: {doc_no}")
             else:
                 QMessageBox.warning(self, "失败", message)
                 self.status_label.setText(f"保存失败: {message}")
@@ -178,16 +362,17 @@ class SendDocumentDialog(QDialog):
     
     def on_clear(self):
         """清空表单"""
-        self.doc_no_input.clear()
+        self.doc_no_preview.clear()
         self.title_input.clear()
         self.issuing_unit_input.clear()
         self.send_to_unit_input.clear()
-        self.m_level_combo.setCurrentIndex(0)
+        self.security_combo.setCurrentIndex(0)
+        self.document_type_combo.setCurrentIndex(0 if self.document_type_combo.count() > 0 else -1)
         self.processor_input.clear()
         self.send_date_input.setDate(QDate.currentDate())
         self.remarks_input.clear()
         self.status_label.setText("")
-        self.doc_no_input.setFocus()
+        self.title_input.setFocus()
     
     def on_search_send(self):
         """查询发文记录（可选功能）"""
