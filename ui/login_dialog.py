@@ -5,7 +5,7 @@
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-    QLineEdit, QPushButton, QMessageBox, QCheckBox
+    QLineEdit, QPushButton, QMessageBox, QCheckBox, QRadioButton, QButtonGroup
 )
 from PySide6.QtGui import QFont, QIcon, QPixmap
 from PySide6.QtCore import Qt, Signal
@@ -50,7 +50,9 @@ class LoginDialog(QDialog):
         title_label = QLabel("公文智能管理系统")
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
-        title_label.setStyleSheet("color: #2c3e50; margin: 20px 0;")
+        title_label.setMinimumHeight(56)
+        title_label.setContentsMargins(0, 8, 0, 8)
+        title_label.setStyleSheet("color: #2c3e50;")
         
         # 用户名输入
         username_layout = QHBoxLayout()
@@ -58,7 +60,6 @@ class LoginDialog(QDialog):
         username_label.setFixedWidth(60)
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("请输入用户名")
-        self.username_input.setText("admin")  # 默认用户名
         
         username_layout.addWidget(username_label)
         username_layout.addWidget(self.username_input)
@@ -70,7 +71,6 @@ class LoginDialog(QDialog):
         self.password_input = QLineEdit()
         self.password_input.setPlaceholderText("请输入密码")
         self.password_input.setEchoMode(QLineEdit.Password)
-        self.password_input.setText("123456")  # 默认密码
         
         password_layout.addWidget(password_label)
         password_layout.addWidget(self.password_input)
@@ -78,6 +78,23 @@ class LoginDialog(QDialog):
         # 记住密码选项
         self.remember_checkbox = QCheckBox("记住密码")
         self.remember_checkbox.setChecked(True)
+
+        # 登录角色选择
+        role_layout = QHBoxLayout()
+        role_label = QLabel("登录身份:")
+        role_label.setFixedWidth(60)
+        self.operator_radio = QRadioButton("我是经办人")
+        self.admin_radio = QRadioButton("我是管理员")
+        self.operator_radio.setChecked(True)
+
+        self.role_group = QButtonGroup(self)
+        self.role_group.addButton(self.operator_radio)
+        self.role_group.addButton(self.admin_radio)
+
+        role_layout.addWidget(role_label)
+        role_layout.addWidget(self.operator_radio)
+        role_layout.addWidget(self.admin_radio)
+        role_layout.addStretch()
         
         # 登录按钮
         self.login_button = QPushButton("登录")
@@ -156,6 +173,7 @@ class LoginDialog(QDialog):
         layout.addWidget(title_label)
         layout.addLayout(username_layout)
         layout.addLayout(password_layout)
+        layout.addLayout(role_layout)
         layout.addWidget(self.remember_checkbox)
         layout.addLayout(button_layout)
         layout.addWidget(register_hint)  # 添加注册提示
@@ -176,13 +194,15 @@ class LoginDialog(QDialog):
         if not username or not password:
             self.show_error("用户名和密码不能为空")
             return
+
+        expected_role = 'admin' if self.admin_radio.isChecked() else 'operator'
         
         # 禁用按钮，防止重复点击
         self.set_ui_enabled(False)
         self.status_label.setText("正在验证...")
         
         # 执行登录
-        success, message, user_info = self.auth_manager.login(username, password)
+        success, message, user_info = self.auth_manager.login(username, password, expected_role=expected_role)
         
         if success:
             self.status_label.setText("登录成功！")
