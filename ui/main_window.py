@@ -152,8 +152,12 @@ class MainWindow(QMainWindow):
         # 创建布局
         layout = QVBoxLayout(central_widget)
         
+        role_text = '管理员' if self.current_user.get('role') == 'admin' else '经办人'
+        display_name = str(self.current_user.get('real_name') or '').strip()
+        if not display_name or display_name.lower() == 'none':
+            display_name = str(self.current_user.get('username') or '用户').strip() or '用户'
         # 欢迎标签
-        welcome_label = QLabel(f"欢迎使用公文智能管理系统，{self.current_user.get('real_name', '用户')}！")
+        welcome_label = QLabel(f"欢迎使用公文智能管理系统，{display_name}（{role_text}）！")
         layout.addWidget(welcome_label)
         
         # 中央流程按钮
@@ -237,80 +241,89 @@ class MainWindow(QMainWindow):
         layout.addLayout(button_layout)
 
     def create_flow_buttons(self, layout):
-        """在中央位置创建发文/收文/流转管理按钮，箭头连接"""
+        """在中央位置创建发文/收文/流转管理按钮"""
+        button_w = 220
+        button_h = 56
+
         flow_layout = QHBoxLayout()
         flow_layout.setSpacing(20)
+
         # 发文
         self.send_btn = QPushButton("发文管理")
-        self.send_btn.setMinimumSize(120, 60)
+        self.send_btn.setFixedSize(button_w, button_h)
         self.send_btn.clicked.connect(self.on_send_document)
-        self.send_btn.setStyleSheet("font-size:16px;")
         flow_layout.addWidget(self.send_btn)
-        arrow1 = QLabel("→")
-        arrow1.setFont(QFont("Microsoft YaHei", 24))
-        arrow1.setAlignment(Qt.AlignCenter)
-        flow_layout.addWidget(arrow1)
+
         # 收文
         self.receive_btn = QPushButton("收文管理")
-        self.receive_btn.setMinimumSize(120, 60)
+        self.receive_btn.setFixedSize(button_w, button_h)
         self.receive_btn.clicked.connect(self.on_receive_document)
-        self.receive_btn.setStyleSheet("font-size:16px;")
-        if self.current_user.get('role') != 'admin':
-            self.receive_btn.setEnabled(False)
-            self.receive_btn.setToolTip("仅管理员可使用收文管理")
         flow_layout.addWidget(self.receive_btn)
-        arrow2 = QLabel("→")
-        arrow2.setFont(QFont("Microsoft YaHei", 24))
-        arrow2.setAlignment(Qt.AlignCenter)
-        flow_layout.addWidget(arrow2)
+
         # 流转
         self.circulation_btn = QPushButton("流转管理")
-        self.circulation_btn.setMinimumSize(120, 60)
+        self.circulation_btn.setFixedSize(button_w, button_h)
         self.circulation_btn.clicked.connect(self.on_circulation)
-        self.circulation_btn.setStyleSheet("font-size:16px;")
-        if self.current_user.get('role') != 'admin':
-            self.circulation_btn.setEnabled(False)
-            self.circulation_btn.setToolTip("仅管理员可使用流转管理")
         flow_layout.addWidget(self.circulation_btn)
-        
-        layout.addLayout(flow_layout)        # 在流程按钮下方添加一个显眼的通用查询按钮
-        self.query_btn = QPushButton("公文查询")
-        self.query_btn.setMinimumSize(120, 40)
-        self.query_btn.setStyleSheet("font-size:14px; background-color:#f39c12; color:#fff;")
+
+        layout.addLayout(flow_layout)
+        layout.addSpacing(22)
+
+        # 下方功能按钮（统一尺寸与颜色）
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(20)
+
+        self.query_btn = QPushButton("通用公文查询")
+        self.query_btn.setFixedSize(button_w, button_h)
         self.query_btn.clicked.connect(self.on_universal_query)
-        layout.addWidget(self.query_btn, alignment=Qt.AlignCenter)        # 初始化高亮
+        bottom_layout.addWidget(self.query_btn)
+
+        self.statistics_btn = QPushButton("统计报表")
+        self.statistics_btn.setFixedSize(button_w, button_h)
+        self.statistics_btn.clicked.connect(self.on_statistics)
+        bottom_layout.addWidget(self.statistics_btn)
+
+        self.pickup_btn = QPushButton("取件登记与查询")
+        self.pickup_btn.setFixedSize(button_w, button_h)
+        self.pickup_btn.clicked.connect(self.on_pickup_management)
+        bottom_layout.addWidget(self.pickup_btn)
+
+        layout.addLayout(bottom_layout)
+
+        # 统一按钮样式
+        self._apply_button_style(self.query_btn)
+        self._apply_button_style(self.statistics_btn)
+        self._apply_button_style(self.pickup_btn)
+
+        # 初始化高亮
         self._update_flow_highlight(-1)
+
+    def _base_button_style(self, active: bool = False) -> str:
+        if active:
+            return (
+                "QPushButton {background-color:#2D7FEA; color:white; border:1px solid #2D7FEA; "
+                "font-size:16px; font-weight:600; border-radius:2px;}"
+                "QPushButton:hover {background-color:#2D7FEA;}"
+            )
+        return (
+            "QPushButton {background-color:#F5F7FA; color:#1F2937; border:1px solid #D1D5DB; "
+            "font-size:16px; font-weight:600; border-radius:2px;}"
+            "QPushButton:hover {background-color:#EEF2F7;}"
+        )
+
+    def _apply_button_style(self, btn: QPushButton, active: bool = False):
+        btn.setStyleSheet(self._base_button_style(active=active))
 
     def _update_flow_highlight(self, index):
         """高亮当前步骤按钮，index：0=发文,1=收文,2=流转"""
-        default = "background-color:none; color:#000;"
-        active = "background-color:#27ae60; color:#fff;"
-        self.send_btn.setStyleSheet(active if index==0 else default)
-        self.receive_btn.setStyleSheet(active if index==1 else default)
-        self.circulation_btn.setStyleSheet(active if index==2 else default)
+        self._apply_button_style(self.send_btn, active=(index == 0))
+        self._apply_button_style(self.receive_btn, active=(index == 1))
+        self._apply_button_style(self.circulation_btn, active=(index == 2))
     
     def create_menu_bar(self):
         """创建菜单栏"""
         menubar = self.menuBar()
-        current_role = self.current_user.get('role', 'user')
-        
-        # 文件菜单
-        file_menu = menubar.addMenu("文件")
-        
-        exit_action = QAction("退出", self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-        
-        # 查询菜单（所有用户可见）
-        query_menu = menubar.addMenu("查询统计")
-
-        universal_query_action = QAction("通用公文查询", self)
-        universal_query_action.triggered.connect(self.on_universal_query)
-        query_menu.addAction(universal_query_action)
-
-        statistics_action = QAction("统计报表", self)
-        statistics_action.triggered.connect(self.on_statistics)
-        query_menu.addAction(statistics_action)
+        current_role = self.current_user.get('role', 'operator')
         
         # 系统菜单
         sys_menu = menubar.addMenu("系统")
@@ -357,9 +370,6 @@ class MainWindow(QMainWindow):
     
     def on_circulation(self):
         """公文流转"""
-        if self.current_user.get('role') != 'admin':
-            QMessageBox.warning(self, "权限不足", "流转管理仅管理员可操作")
-            return
         self._update_flow_highlight(2)
         try:
             if self.workflow_dialogs['circulation'] is None:
@@ -420,7 +430,7 @@ class MainWindow(QMainWindow):
             "• 公文流转\n"
             "• 统计报表\n\n"
             f"当前用户: {self.current_user.get('real_name', '')}\n"
-            f"用户角色: {self.current_user.get('role', 'user')}\n"
+            f"用户角色: {'管理员' if self.current_user.get('role') == 'admin' else '经办人'}\n"
         )
     
     def on_ocr_processing(self):
@@ -435,9 +445,6 @@ class MainWindow(QMainWindow):
     
     def on_receive_document(self):
         """收文登记"""
-        if self.current_user.get('role') != 'admin':
-            QMessageBox.warning(self, "权限不足", "收文管理仅管理员可操作")
-            return
         self._update_flow_highlight(1)
         try:
             # 直接先打开 OCR 识别对话框以提升效率，识别成功后再打开收文登记对话框并填充结果
@@ -517,3 +524,18 @@ class MainWindow(QMainWindow):
         from .system_config_dialog import SystemConfigDialog
         dialog = SystemConfigDialog(self.db_manager, self.current_user, self)
         dialog.exec()
+
+    def on_pickup_management(self):
+        """取件登记与查询"""
+        self._open_pickup_dialog(mode='pickup')
+
+    def _open_pickup_dialog(self, mode='pickup'):
+        """打开取件管理对话框并定位到指定模式。"""
+        try:
+            from .pickup_manager_dialog import PickupManagerDialog
+            dialog = PickupManagerDialog(self.db_manager, self.current_user, self, initial_mode=mode)
+            dialog.exec()
+        except ImportError as e:
+            QMessageBox.warning(self, "功能未实现", f"取件管理模块未找到: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"打开取件管理失败: {e}")
