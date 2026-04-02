@@ -36,10 +36,10 @@ class CirculationQueryDialog(QDialog):
         self.doc_type_combo.addItems(["全部", "收文", "发文"])
         query_layout.addRow("文档类型:", self.doc_type_combo)
         
-        # 文档ID
-        self.doc_id_input = QLineEdit()
-        self.doc_id_input.setPlaceholderText("请输入收文ID")
-        query_layout.addRow("收文ID:", self.doc_id_input)
+        # 文号
+        self.doc_no_input = QLineEdit()
+        self.doc_no_input.setPlaceholderText("请输入文号")
+        query_layout.addRow("文号:", self.doc_no_input)
         
         # 流转类型
         self.circ_type_combo = QComboBox()
@@ -78,7 +78,7 @@ class CirculationQueryDialog(QDialog):
         self.result_table = QTableWidget()
         self.result_table.setColumnCount(10)
         self.result_table.setHorizontalHeaderLabels([
-            "流转ID", "文档类型", "收文ID", "流转类型", "下一节点", "状态", 
+            "文档类型", "文号", "标题", "流转类型", "下一节点", "状态", 
             "借阅日期", "应还日期", "实际归还", "创建时间"
         ])
         self.result_table.horizontalHeader().setStretchLastSection(True)
@@ -102,14 +102,7 @@ class CirculationQueryDialog(QDialog):
             if doc_type != "全部":
                 filters['document_type'] = 'receive' if doc_type == '收文' else 'send'
             
-            # 文档ID
-            doc_id = self.doc_id_input.text().strip()
-            if doc_id:
-                try:
-                    filters['document_id'] = int(doc_id)
-                except ValueError:
-                    QMessageBox.warning(self, "警告", "收文ID必须是数字")
-                    return
+            doc_no = self.doc_no_input.text().strip()
             
             # 流转类型
             circ_type = self.circ_type_combo.currentText()
@@ -124,9 +117,12 @@ class CirculationQueryDialog(QDialog):
             success, message, result = self.db_manager.get_circulation_records(filters)
             
             if success:
-                self.display_results(result['records'])
-                self.export_button.setEnabled(len(result['records']) > 0)
-                self.status_label.setText(f"查询完成，共找到 {result['total']} 条记录")
+                records = result['records']
+                if doc_no:
+                    records = [r for r in records if doc_no in str(r.get('document_no', '') or '')]
+                self.display_results(records)
+                self.export_button.setEnabled(len(records) > 0)
+                self.status_label.setText(f"查询完成，共找到 {len(records)} 条记录")
             else:
                 QMessageBox.warning(self, "查询失败", message)
                 
@@ -140,14 +136,16 @@ class CirculationQueryDialog(QDialog):
         self.result_table.setRowCount(len(records))
         
         for i, record in enumerate(records):
-            self.result_table.setItem(i, 0, QTableWidgetItem(str(record.get('id', ''))))
-            self.result_table.setItem(i, 1, QTableWidgetItem(record.get('document_type', '')))
-            self.result_table.setItem(i, 2, QTableWidgetItem(str(record.get('document_id', ''))))
+            dtype = record.get('document_type', '')
+            dtype_text = '收文' if dtype == 'receive' else ('发文' if dtype == 'send' else str(dtype))
+            self.result_table.setItem(i, 0, QTableWidgetItem(dtype_text))
+            self.result_table.setItem(i, 1, QTableWidgetItem(str(record.get('document_no', '') or '')))
+            self.result_table.setItem(i, 2, QTableWidgetItem(str(record.get('title', '') or '')))
             self.result_table.setItem(i, 3, QTableWidgetItem(record.get('circulation_type', '')))
             
             # 下一节点
             next_node = f"{record.get('next_node_unit', '')}/{record.get('next_node_person', '')}"
-            self.result_table.setItem(i, 4, QTableWidgetItem(next_node))
+            self.result_table.setItem(i, 4, QTableWidgetItem(next_node.strip('/')))
             
             self.result_table.setItem(i, 5, QTableWidgetItem(record.get('status', '')))
             
@@ -165,7 +163,7 @@ class CirculationQueryDialog(QDialog):
     def on_clear(self):
         """清空查询条件"""
         self.doc_type_combo.setCurrentIndex(0)
-        self.doc_id_input.clear()
+        self.doc_no_input.clear()
         self.circ_type_combo.setCurrentIndex(0)
         self.status_combo.setCurrentIndex(0)
         self.result_table.setRowCount(0)
