@@ -88,7 +88,7 @@ class RegisterDialog(QDialog):
         
         # 角色
         self.role_combo = QComboBox()
-        self.role_combo.addItems(["普通用户", "管理员"])
+        self.role_combo.addItems(["经办人", "管理员"])
         form_layout.addRow("角色:", self.role_combo)
         
         form_group.setLayout(form_layout)
@@ -228,7 +228,7 @@ class RegisterDialog(QDialog):
             'position': self.position_input.text().strip(),
             'email': self.email_input.text().strip(),
             'phone': self.phone_input.text().strip(),
-            'role': 'admin' if self.role_combo.currentText() == '管理员' else 'user'
+            'role': 'admin' if self.role_combo.currentText() == '管理员' else 'operator'
         }
         
         # 再次验证
