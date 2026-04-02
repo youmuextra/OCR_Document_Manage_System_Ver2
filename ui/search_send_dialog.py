@@ -76,10 +76,9 @@ class SearchSendDialog(QDialog):
         
         # 结果表格
         self.result_table = QTableWidget()
-        # ✅ 修改：添加ID列，共10列
-        self.result_table.setColumnCount(10)
+        # 仅展示业务字段，不展示内部ID
+        self.result_table.setColumnCount(9)
         self.result_table.setHorizontalHeaderLabels([
-            "发文ID",         # ✅ 添加文档ID列
             "文号", 
             "标题", 
             "发文单位", 
@@ -93,8 +92,7 @@ class SearchSendDialog(QDialog):
         
         # 设置列宽
         self.result_table.horizontalHeader().setStretchLastSection(True)
-        self.result_table.setColumnWidth(0, 60)   # ID列宽度
-        self.result_table.setColumnWidth(1, 120)  # 文号列宽度
+        self.result_table.setColumnWidth(0, 140)  # 文号列宽度
         
         layout.addWidget(self.result_table)
         
@@ -149,27 +147,26 @@ class SearchSendDialog(QDialog):
         self.result_table.setRowCount(len(documents))
         
         for i, doc in enumerate(documents):
-            self.result_table.setItem(i, 0, QTableWidgetItem(str(doc.get('id', ''))))
-            self.result_table.setItem(i, 1, QTableWidgetItem(doc.get('document_no', '')))
-            self.result_table.setItem(i, 2, QTableWidgetItem(doc.get('title', '')))
-            self.result_table.setItem(i, 3, QTableWidgetItem(doc.get('issuing_unit', '')))
-            self.result_table.setItem(i, 4, QTableWidgetItem(doc.get('send_to_unit', '')))
-            self.result_table.setItem(i, 5, QTableWidgetItem(doc.get('processor', '')))
+            self.result_table.setItem(i, 0, QTableWidgetItem(doc.get('document_no', '')))
+            self.result_table.setItem(i, 1, QTableWidgetItem(doc.get('title', '')))
+            self.result_table.setItem(i, 2, QTableWidgetItem(doc.get('issuing_unit', '')))
+            self.result_table.setItem(i, 3, QTableWidgetItem(doc.get('send_to_unit', '')))
+            self.result_table.setItem(i, 4, QTableWidgetItem(doc.get('processor', '')))
             
             # 发文日期
             send_date = doc.get('send_date')
             if send_date and hasattr(send_date, 'strftime'):
                 send_date = send_date.strftime("%Y-%m-%d")
-            self.result_table.setItem(i, 6, QTableWidgetItem(str(send_date)))
+            self.result_table.setItem(i, 5, QTableWidgetItem(str(send_date)))
             
-            self.result_table.setItem(i, 7, QTableWidgetItem(doc.get('send_status', '')))
-            self.result_table.setItem(i, 8, QTableWidgetItem(doc.get('remarks', '')))
+            self.result_table.setItem(i, 6, QTableWidgetItem(doc.get('send_status', '')))
+            self.result_table.setItem(i, 7, QTableWidgetItem(doc.get('remarks', '')))
             
             # ✅ 修复操作按钮的lambda函数
             action_button = QPushButton("查看")
             # lambda需要checked参数
             action_button.clicked.connect(lambda checked=False, d=doc: self.on_view_document(d))
-            self.result_table.setCellWidget(i, 9, action_button)
+            self.result_table.setCellWidget(i, 8, action_button)
     
     def on_view_document(self, document):
         """查看发文详情"""
