@@ -9,7 +9,6 @@ import cv2
 import numpy as np
 from PIL import Image
 from pdf2image import convert_from_path
-from paddleocr import PaddleOCR
 import tempfile
 from datetime import datetime
 import logging
