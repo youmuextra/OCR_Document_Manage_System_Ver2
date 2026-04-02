@@ -56,6 +56,35 @@ class StatisticsDialog(QDialog):
             # 其他类型
             return str(date_obj)[:10] if date_obj else "未知"
 
+    def _format_datetime_display(self, value):
+        """统一时间显示：去除微秒，仅保留到秒。"""
+        if value is None:
+            return ""
+
+        if isinstance(value, datetime):
+            return value.strftime('%Y-%m-%d %H:%M:%S')
+
+        text = str(value).strip()
+        if not text:
+            return ""
+
+        text = text.replace('T', ' ')
+        # 常见格式：YYYY-MM-DD HH:MM:SS.ffffff -> YYYY-MM-DD HH:MM:SS
+        if len(text) >= 19 and text[4] == '-' and text[7] == '-' and text[10] == ' ' and text[13] == ':' and text[16] == ':':
+            return text[:19]
+        return text
+
+    def _format_date_display(self, value):
+        """按日期显示（YYYY-MM-DD）。"""
+        if value is None:
+            return ""
+        if isinstance(value, datetime):
+            return value.strftime('%Y-%m-%d')
+        text = str(value).strip().replace('T', ' ')
+        if not text:
+            return ""
+        return text[:10] if len(text) >= 10 else text
+
     def _get_default_chart_color(self, title: str) -> str:
         """按统计主题返回默认图表主色。"""
         title = str(title or '')
@@ -142,6 +171,20 @@ class StatisticsDialog(QDialog):
         if '用户活跃度' in stat_type:
             return '#6D28D9'
         return '#374151'
+
+    def _apply_time_header_tooltips(self, headers):
+        """为时间列添加表头悬停说明，降低理解成本。"""
+        tips = {
+            '发文时间': '该公文在发文模块登记/发送的时间（精确到秒）。',
+            '收文时间': '该公文在收文模块登记接收的时间（精确到秒）。',
+            '发起流转时间': '该公文发起流转记录的时间（精确到秒）。',
+            '取件时间': '取件人实际取走公文的时间（精确到秒）。',
+            '归还时间': '取件/借阅后归还公文的时间（精确到秒）。',
+        }
+        for idx, h in enumerate(headers or []):
+            item = self.table_widget.horizontalHeaderItem(idx)
+            if item and h in tips:
+                item.setToolTip(tips[h])
     
     def setup_ui(self):
         """设置UI"""
@@ -167,11 +210,7 @@ class StatisticsDialog(QDialog):
         # 统计类型
         self.stat_type_combo = QComboBox()
         self.stat_type_combo.addItems([
-            "整体统计", 
-            "发文统计", 
-            "收文统计", 
-            "流转统计",
-            "用户活跃度"
+            "综合明细统计"
         ])
         query_layout.addRow("统计类型:", self.stat_type_combo)
         
@@ -337,50 +376,10 @@ class StatisticsDialog(QDialog):
     def _do_generate_statistics(self, stat_type, start_date, end_date):
         """实际生成统计报表"""
         try:
-            # 根据统计类型调用不同的方法
-            if stat_type == "整体统计":
-                success, message, result = self.db_manager.get_statistics(start_date, end_date)
-                if success:
-                    self.display_overall_statistics(result)
-                else:
-                    raise Exception(message)
-                    
-            elif stat_type == "发文统计":
-                # 获取发文数据
-                success, message, result = self.db_manager.get_send_documents(
-                    filters={'start_date': start_date, 'end_date': end_date},
-                    page_size=1000
-                )
-                if success:
-                    self.display_send_statistics(result['documents'], start_date, end_date)
-                else:
-                    raise Exception(message)
-                    
-            elif stat_type == "收文统计":
-                # 获取收文数据
-                success, message, result = self.db_manager.search_documents(
-                    filters={'start_date': start_date, 'end_date': end_date},
-                    page_size=1000
-                )
-                if success:
-                    self.display_receive_statistics(result['documents'], start_date, end_date)
-                else:
-                    raise Exception(message)
-                    
-            elif stat_type == "流转统计":
-                # 获取流转数据
-                success, message, result = self.db_manager.get_circulation_records(
-                    filters={'start_date': start_date, 'end_date': end_date},
-                    page_size=1000
-                )
-                if success:
-                    self.display_circulation_statistics(result['records'], start_date, end_date)
-                else:
-                    raise Exception(message)
-                    
-            elif stat_type == "用户活跃度":
-                # 获取用户活跃度数据
-                self.display_user_activity(start_date, end_date)
+            success, message, records = self.db_manager.get_statistics_detail_records(start_date, end_date)
+            if not success:
+                raise Exception(message)
+            self.display_detail_statistics(records, start_date, end_date)
             
             # 启用导出按钮
             self.export_button.setEnabled(True)
@@ -391,6 +390,50 @@ class StatisticsDialog(QDialog):
             self.status_label.setText("统计失败")
         finally:
             self.generate_button.setEnabled(True)
+
+    def display_detail_statistics(self, records, start_date, end_date):
+        """显示统一统计明细表（无柱状图）。"""
+        start_str = self.safe_date_format(start_date)
+        end_str = self.safe_date_format(end_date)
+        self.chart_title.setText(f"综合明细统计（{start_str} 至 {end_str}）")
+        # 明细模式下仅保留表格，隐藏中间图表/提示区域
+        self.chart_widget.hide()
+        self.splitter.setSizes([0, 700])
+
+        headers = [
+            "文号", "标题", "密级", "紧急程度", "发文单位", "发文时间", "去向/发往", "经办人",
+            "收文时间", "发起流转时间", "流转类型", "取件单位", "取件人", "取件时间", "归还时间",
+            "状态", "备注"
+        ]
+        table_data = [headers]
+
+        for r in records or []:
+            table_data.append([
+                str(r.get('文号', '')),
+                str(r.get('标题', '')),
+                str(r.get('密级', '')),
+                str(r.get('紧急程度', '')),
+                str(r.get('发文单位', '')),
+                self._format_date_display(r.get('发文时间', '')),
+                str(r.get('去向/发往', '')),
+                str(r.get('经办人', '')),
+                self._format_date_display(r.get('收文时间', '')),
+                self._format_datetime_display(r.get('发起流转时间', '')),
+                str(r.get('流转类型', '')),
+                str(r.get('取件单位', '')),
+                str(r.get('取件人', '')),
+                self._format_datetime_display(r.get('取件时间', '')),
+                self._format_datetime_display(r.get('归还时间', '')),
+                str(r.get('状态', '')),
+                str(r.get('备注', '')),
+            ])
+
+        self.display_table(table_data)
+        self.stats_data = {
+            'records': records,
+            'start_date': start_date,
+            'end_date': end_date
+        }
     
     def display_overall_statistics(self, data):
         """显示整体统计"""
@@ -898,6 +941,7 @@ class StatisticsDialog(QDialog):
         # 设置表头
         if rows > 0:
             self.table_widget.setHorizontalHeaderLabels(data[0])
+            self._apply_time_header_tooltips(data[0])
             header_bg = self._get_header_background_color()
             header_fg = self._get_header_foreground_color()
             self.table_widget.horizontalHeader().setStyleSheet(
@@ -948,6 +992,12 @@ class StatisticsDialog(QDialog):
         for col, header_text in enumerate(headers):
             if col == 0:
                 header.setSectionResizeMode(col, QHeaderView.Stretch)
+            elif header_text in ('发文时间', '收文时间', '发起流转时间', '取件时间', '归还时间'):
+                header.setSectionResizeMode(col, QHeaderView.Fixed)
+                self.table_widget.setColumnWidth(col, 170)
+            elif header_text == '状态':
+                header.setSectionResizeMode(col, QHeaderView.Fixed)
+                self.table_widget.setColumnWidth(col, 220)
             elif header_text == '数量':
                 header.setSectionResizeMode(col, QHeaderView.Fixed)
                 self.table_widget.setColumnWidth(col, 70)
@@ -974,7 +1024,7 @@ class StatisticsDialog(QDialog):
         file_name, _ = QFileDialog.getSaveFileName(
             self,
             "导出报表",
-            f"公文统计报表_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            f"公文统计报表_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             "CSV文件 (*.csv);;Excel文件 (*.xlsx);;文本文件 (*.txt)"
         )
         
@@ -984,10 +1034,12 @@ class StatisticsDialog(QDialog):
         try:
             if file_name.endswith('.csv'):
                 self.export_to_csv(file_name)
+            elif file_name.endswith('.xlsx'):
+                self.export_to_xlsx(file_name)
             elif file_name.endswith('.txt'):
                 self.export_to_txt(file_name)
             else:
-                QMessageBox.warning(self, "格式不支持", "目前只支持CSV和TXT格式导出")
+                QMessageBox.warning(self, "格式不支持", "目前支持CSV/Excel/TXT格式导出")
                 return
             
             QMessageBox.information(self, "成功", f"报表已导出到: {file_name}")
@@ -1005,13 +1057,82 @@ class StatisticsDialog(QDialog):
             # 获取表格数据
             rows = self.table_widget.rowCount()
             cols = self.table_widget.columnCount()
+
+            # 写入表头
+            headers = []
+            for col in range(cols):
+                item = self.table_widget.horizontalHeaderItem(col)
+                headers.append(item.text() if item else "")
+            writer.writerow(headers)
+
+            time_headers = {'发文时间', '收文时间', '发起流转时间', '取件时间', '归还时间'}
+            time_col_indexes = {idx for idx, h in enumerate(headers) if h in time_headers}
             
             for row in range(rows):
                 row_data = []
                 for col in range(cols):
                     item = self.table_widget.item(row, col)
-                    row_data.append(item.text() if item else "")
+                    text = item.text() if item else ""
+                    # 避免Excel打开CSV时把时间转成数值导致显示#####
+                    if col in time_col_indexes and text:
+                        text = f"\t{text}"
+                    row_data.append(text)
                 writer.writerow(row_data)
+
+    def export_to_xlsx(self, file_name):
+        """导出为Excel。"""
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment
+        from openpyxl.utils import get_column_letter
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "统计明细"
+
+        # 表头
+        headers = []
+        for col in range(self.table_widget.columnCount()):
+            item = self.table_widget.horizontalHeaderItem(col)
+            headers.append(item.text() if item else "")
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        ws.freeze_panes = "A2"
+        if headers:
+            ws.auto_filter.ref = f"A1:{chr(64 + len(headers))}1" if len(headers) <= 26 else None
+
+        time_headers = {'发文时间', '收文时间', '发起流转时间', '取件时间', '归还时间'}
+        time_col_indexes = [idx + 1 for idx, h in enumerate(headers) if h in time_headers]
+        col_max_len = [len(str(h or '')) for h in headers]
+
+        # 数据
+        for row in range(self.table_widget.rowCount()):
+            row_data = []
+            for col in range(self.table_widget.columnCount()):
+                item = self.table_widget.item(row, col)
+                text = item.text() if item else ""
+                row_data.append(text)
+                col_max_len[col] = max(col_max_len[col], len(str(text)))
+            ws.append(row_data)
+
+        # 时间列强制按文本写入，避免Excel显示#####
+        for col_idx in time_col_indexes:
+            for row_idx in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                val = '' if cell.value is None else str(cell.value)
+                cell.value = val
+                cell.number_format = '@'
+                cell.alignment = Alignment(horizontal='left', vertical='center')
+
+        # 自适应列宽（时间列给最小宽度）
+        for col_idx, max_len in enumerate(col_max_len, start=1):
+            is_time_col = col_idx in time_col_indexes
+            target_width = max(max_len + 2, 21 if is_time_col else 10)
+            target_width = min(target_width, 60)
+            ws.column_dimensions[get_column_letter(col_idx)].width = target_width
+
+        wb.save(file_name)
     
     def export_to_txt(self, file_name):
         """导出为TXT"""
@@ -1026,19 +1147,22 @@ class StatisticsDialog(QDialog):
             # 写入表格数据
             rows = self.table_widget.rowCount()
             cols = self.table_widget.columnCount()
+
+            # 写入表头
+            headers = []
+            for col in range(cols):
+                item = self.table_widget.horizontalHeaderItem(col)
+                headers.append(item.text() if item else "")
+            txtfile.write(" | ".join(headers) + "\n")
+            txtfile.write("-" * 120 + "\n")
             
             for row in range(rows):
                 row_data = []
                 for col in range(cols):
                     item = self.table_widget.item(row, col)
                     row_data.append(item.text() if item else "")
-                
-                # 格式化行
-                if row == 0:  # 表头
-                    txtfile.write(" | ".join(row_data) + "\n")
-                    txtfile.write("-" * 60 + "\n")
-                else:
-                    txtfile.write(" | ".join(row_data) + "\n")
+
+                txtfile.write(" | ".join(row_data) + "\n")
     
     def print_report(self):
         """打印报表"""
