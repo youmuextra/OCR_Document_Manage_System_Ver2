@@ -121,23 +121,15 @@ class ReceiveDocumentDialog(QDialog):
         form_layout.addRow("发文单位:", self.unit_input)
         self.date_input = QDateEdit(); self.date_input.setDate(QDate.currentDate()); self.date_input.setCalendarPopup(True)
         form_layout.addRow("收文日期:", self.date_input)
-        self.processor_input = QLineEdit(); self.processor_input.setPlaceholderText("请输入经办人");
-        self.processor_input.setText(self.current_user.get('real_name',''))
-        form_layout.addRow("经办人:", self.processor_input)
-        self.location_input = QLineEdit(); self.location_input.setPlaceholderText("请输入存放位置")
-        form_layout.addRow("存放位置:", self.location_input)
         self.security_combo = QComboBox(); self.security_combo.addItems(["普通","秘密","机密","绝密"])
         form_layout.addRow("密级:", self.security_combo)
         self.urgency_combo = QComboBox(); self.urgency_combo.addItems(["普通","平急","加急","特急","急件"])
         form_layout.addRow("紧急程度:", self.urgency_combo)
-        self.type_combo = QComboBox(); self.type_combo.addItems(["通知","报告","请示","批复","函","纪要","其他"])
-        form_layout.addRow("文种:", self.type_combo)
+        self.processor_input = QLineEdit(); self.processor_input.setPlaceholderText("请输入经办人");
+        self.processor_input.setText(self.current_user.get('real_name',''))
+        form_layout.addRow("经办人:", self.processor_input)
         self.copies_input = QLineEdit(); self.copies_input.setText("1"); self.copies_input.setMaximumWidth(50)
         form_layout.addRow("份数:", self.copies_input)
-        self.content_input = QTextEdit(); self.content_input.setMaximumHeight(100); self.content_input.setPlaceholderText("请输入内容摘要")
-        form_layout.addRow("内容摘要:", self.content_input)
-        self.keywords_input = QLineEdit(); self.keywords_input.setPlaceholderText("请输入关键词，用逗号分隔")
-        form_layout.addRow("关键词:", self.keywords_input)
         self.remarks_input = QTextEdit(); self.remarks_input.setMaximumHeight(80); self.remarks_input.setPlaceholderText("请输入备注信息")
         form_layout.addRow("备注:", self.remarks_input)
 
@@ -687,16 +679,7 @@ class ReceiveDocumentDialog(QDialog):
                 self.unit_input.setText(unit_val)
                 fields_filled += 1
             
-            if summary_val:
-                self.content_input.setPlainText(summary_val)
-                fields_filled += 1
-            
-            keywords_val = document_info.get('keywords')
-            if isinstance(keywords_val, (list, tuple)):
-                keywords_val = ', '.join([str(x) for x in keywords_val if str(x).strip()])
-            if keywords_val:
-                self.keywords_input.setText(str(keywords_val))
-                fields_filled += 1
+            # 按新要求：不再在收文登记页展示“内容摘要/关键词”
 
             # 收文日期兼容填充（支持 YYYY-MM-DD / YYYY年M月D日）
             date_val = (document_info.get('received_date') or document_info.get('date') or '').strip()
@@ -784,12 +767,8 @@ class ReceiveDocumentDialog(QDialog):
             'received_date': self.date_input.date().toPython(),
             'security_level': self.security_combo.currentText(),
             'urgency_level': self.urgency_combo.currentText(),
-            'document_type': self.type_combo.currentText(),
             'copies': int(self.copies_input.text() or 1),
-            'content_summary': self.content_input.toPlainText().strip(),
-            'keywords': self.keywords_input.text().strip(),
             'remarks': self.remarks_input.toPlainText().strip(),
-            'storage_location': self.location_input.text().strip(),
             'receiver': self.processor_input.text().strip(),
         }
         
@@ -823,7 +802,7 @@ class ReceiveDocumentDialog(QDialog):
                     "成功", 
                     f"收文登记保存成功！\n文号: {document_data.get('document_no', '无')}"
                 )
-                self.status_label.setText(f"收文记录已保存，ID: {doc_id}")
+                self.status_label.setText(f"收文记录已保存，文号: {document_data.get('document_no', '无')}")
                 # 注意：不立即清空表单，允许用户在整个流程结束前查看
                 # self.clear_form()
             else:
@@ -845,14 +824,10 @@ class ReceiveDocumentDialog(QDialog):
         self.unit_input.clear()
         self.date_input.setDate(QDate.currentDate())
         self.processor_input.setText(self.current_user.get('real_name', ''))
-        self.location_input.clear()
-        self.content_input.clear()
-        self.keywords_input.clear()
         self.remarks_input.clear()
         self.copies_input.setText("1")
         self.security_combo.setCurrentIndex(0)
         self.urgency_combo.setCurrentIndex(0)
-        self.type_combo.setCurrentIndex(0)
         self.current_file_path = None
         # 文件页控件在 page_file 对象中
         if hasattr(self, 'page_file'):
