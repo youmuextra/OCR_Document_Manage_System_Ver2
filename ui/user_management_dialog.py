@@ -52,7 +52,7 @@ class UserManagementDialog(QDialog):
         form_layout.addRow("部门:", self.department_input)
         
         self.role_combo = QComboBox()
-        self.role_combo.addItems(["user", "manager", "admin"])
+        self.role_combo.addItems(["operator", "admin"])
         form_layout.addRow("角色:", self.role_combo)
         
         form_group.setLayout(form_layout)
@@ -109,7 +109,9 @@ class UserManagementDialog(QDialog):
                 self.user_table.setItem(i, 1, QTableWidgetItem(user.get('username', '')))
                 self.user_table.setItem(i, 2, QTableWidgetItem(user.get('real_name', '')))
                 self.user_table.setItem(i, 3, QTableWidgetItem(user.get('department', '')))
-                self.user_table.setItem(i, 4, QTableWidgetItem(user.get('role', '')))
+                role_val = user.get('role', '')
+                role_text = '管理员' if role_val == 'admin' else '经办人'
+                self.user_table.setItem(i, 4, QTableWidgetItem(role_text))
                 last_login = user.get('last_login')
                 if last_login and hasattr(last_login, 'strftime'):
                     last_login_str = last_login.strftime("%Y-%m-%d %H:%M")
@@ -215,7 +217,8 @@ class UserManagementDialog(QDialog):
             username = self.user_table.item(row, 1).text()
             real_name = self.user_table.item(row, 2).text()
             #department = self.user_table.item(row, 3).text()
-            role = self.user_table.item(row, 4).text()
+            role_text = self.user_table.item(row, 4).text()
+            role = 'admin' if role_text == '管理员' else 'operator'
             
             self.username_input.setText(username)
             self.real_name_input.setText(real_name)
